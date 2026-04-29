@@ -1,27 +1,24 @@
 // ============================================================
-//  BEAT STUDIO  —  FL Studio-inspired Step Sequencer
-//  Single-file Processing sketch
-//
-//  CLASS ARCHITECTURE:
-//    Step          — one beat cell (active on/off + velocity)
-//    Track         — superclass: name, color, ArrayList<Step>
-//    MelodicTrack  — subclass (extends Track): adds rootNote
-//
-//  ArrayList<Track> holds all tracks dynamically.
-//  Press D to add a Drum track, M to add a Melodic track.
-//  Click a cell to toggle it. SPACE to play/stop.
+//  BEAT STUDIO  —  8-Bit Chiptune Edition
+//  Bypasses broken Windows MIDI drivers using processing.sound
 // ============================================================
 
+import processing.sound.*;
 import java.util.ArrayList;
 
 // ── Global state ────────────────────────────────────────────
 ArrayList<Track> tracks;
-
 int     NUM_STEPS   = 16;
 int     BPM         = 128;
 int     currentStep = 0;
 long    lastStepTime = 0;
 boolean playing     = false;
+
+// ── Audio state (8-Bit Synthesizers) ────────────────────────
+SinOsc     kickOsc;   Env kickEnv;
+WhiteNoise noiseOsc;  Env noiseEnv;
+TriOsc     synthOsc;  Env synthEnv;
+SqrOsc     bassOsc;   Env bassEnv;
 
 // ── Layout constants ────────────────────────────────────────
 int HEADER_H  = 60;
@@ -44,10 +41,8 @@ color CELL_ON_DRM = #E94560;
 color CELL_ON_MEL = #00C9A7;
 color CELL_HOV    = #2A2A4A;
 
-
 // ============================================================
 //  CLASS: Step
-//  The smallest unit — one cell in the beat grid.
 // ============================================================
 class Step {
   boolean active;
@@ -57,80 +52,93 @@ class Step {
     this.active   = false;
     this.velocity = 100;
   }
-
-  Step(boolean startActive) {
-    this.active   = startActive;
-    this.velocity = 100;
-  }
 }
 
-
 // ============================================================
-//  CLASS: Track  (SUPERCLASS)
-//  Stores a name, display color, and a list of Step objects.
+//  CLASS: Track  (DRUMS - Uses Noise & Low Sine Waves)
 // ============================================================
 class Track {
   String          name;
   color           activeColor;
-  ArrayList<Step> steps;   // each track owns its own step list
+  ArrayList<Step> steps;
 
   Track(String name, color activeColor) {
     this.name        = name;
     this.activeColor = activeColor;
     this.steps       = new ArrayList<Step>();
+
     for (int i = 0; i < NUM_STEPS; i++) {
       this.steps.add(new Step());
     }
   }
 
-  int countActive() {
-    int count = 0;
-    for (Step s : steps) {
-      if (s.active) count++;
-    }
-    return count;
-  }
-
   String label() {
     return name;
   }
+
+  void play() {
+    // 8-Bit Drum Synthesis using Envelopes (Attack, Sustain Time, Sustain Level, Release)
+    if (name.equals("Kick") || name.equals("Tom")) {
+      kickOsc.play();
+      kickOsc.freq(name.equals("Kick") ? 55 : 110);
+      kickEnv.play(kickOsc, 0.005, 0.02, 1.0, 0.2);
+    } 
+    else if (name.equals("Snare") || name.equals("Clap")) {
+      noiseOsc.play();
+      noiseEnv.play(noiseOsc, 0.001, 0.05, 0.8, 0.15);
+    } 
+    else if (name.equals("Hi-Hat") || name.equals("Closed HH") || name.equals("Shaker")) {
+      noiseOsc.play();
+      noiseEnv.play(noiseOsc, 0.001, 0.005, 0.4, 0.05);
+    } 
+    else if (name.equals("Open HH") || name.equals("Crash") || name.equals("Ride")) {
+      noiseOsc.play();
+      noiseEnv.play(noiseOsc, 0.001, 0.1, 0.6, 0.4);
+    }
+  }
 }
 
-
 // ============================================================
-//  CLASS: MelodicTrack  (SUBCLASS — extends Track)
-//  Adds a musical root note (pitch) to the base track.
-//  This is the inheritance relationship for the assignment.
+//  CLASS: MelodicTrack  (SYNTHS - Uses Triangle & Square Waves)
 // ============================================================
 class MelodicTrack extends Track {
-  String rootNote;   // e.g. "C3", "G4"
+  String rootNote;
 
-  // super() runs Track's constructor first, then we add rootNote
   MelodicTrack(String name, String rootNote, color activeColor) {
     super(name, activeColor);
     this.rootNote = rootNote;
   }
 
-  // Override the parent label() — a key OOP concept
   String label() {
     return name + " [" + rootNote + "]";
   }
 
-  // Melodic-only method: shift pitch by semitones
-  void transpose(int semitones) {
+  void play() {
+    // Convert Note String (e.g. "C4") to Frequency
     String[] noteNames = { "C","C#","D","D#","E","F","F#","G","G#","A","A#","B" };
     int octave = Character.getNumericValue(rootNote.charAt(rootNote.length() - 1));
     String notePart = rootNote.substring(0, rootNote.length() - 1);
+    
     int idx = 0;
     for (int i = 0; i < noteNames.length; i++) {
       if (noteNames[i].equals(notePart)) { idx = i; break; }
     }
-    int newIdx      = ((idx + semitones) % 12 + 12) % 12;
-    int octaveShift = Math.floorDiv(idx + semitones, 12);
-    rootNote = noteNames[newIdx] + (octave + octaveShift);
+    
+    int pitch = idx + (octave + 1) * 12; 
+    float freq = pow(2.0, (pitch - 69.0) / 12.0) * 440.0;
+
+    // Route to Square wave for Bass, Triangle wave for Leads/Chords
+    if (name.equals("Bass") || name.equals("Sub")) {
+      bassOsc.play();
+      bassOsc.freq(freq);
+      bassEnv.play(bassOsc, 0.01, 0.1, 0.8, 0.2);
+    } else {
+      synthOsc.play();
+      synthOsc.freq(freq);
+      synthEnv.play(synthOsc, 0.02, 0.1, 0.6, 0.3);
+    }
   }
 }
-
 
 // ============================================================
 //  PROCESSING HOOKS
@@ -139,6 +147,12 @@ class MelodicTrack extends Track {
 void setup() {
   size(760, 560);
   smooth(4);
+  
+  // Initialize the 8-Bit Audio Engine
+  kickOsc = new SinOsc(this);    kickEnv = new Env(this);
+  noiseOsc = new WhiteNoise(this); noiseEnv = new Env(this);
+  synthOsc = new TriOsc(this);   synthEnv = new Env(this);
+  bassOsc = new SqrOsc(this);    bassEnv = new Env(this);
 
   tracks = new ArrayList<Track>();
 
@@ -172,10 +186,20 @@ void draw() {
 // ── Sequencer clock ──────────────────────────────────────────
 void advanceSequencer() {
   if (!playing) return;
+
   float msPerStep = (60000.0 / BPM) / 4.0;
   if (millis() - lastStepTime >= msPerStep) {
     lastStepTime = millis();
     currentStep  = (currentStep + 1) % NUM_STEPS;
+    triggerSoundsForStep(currentStep);
+  }
+}
+
+void triggerSoundsForStep(int stepIndex) {
+  for (Track tr : tracks) {
+    if (tr.steps.get(stepIndex).active) {
+      tr.play();
+    }
   }
 }
 
@@ -193,9 +217,11 @@ void drawHeader() {
   text(BPM, 230, HEADER_H / 2 + 8);
 
   boolean hoverPlay = mouseX > 305 && mouseX < 375 && mouseY < HEADER_H;
+
   fill(playing ? ACCENT : (hoverPlay ? #555580 : ACCENT2));
   stroke(playing ? ACCENT : TEXT_DIM); strokeWeight(1.5);
   rect(305, 12, 70, 36, 6);
+
   fill(TEXT_LIGHT); noStroke(); textSize(12);
   textAlign(CENTER, CENTER);
   text(playing ? "■  STOP" : "▶  PLAY", 340, 30);
@@ -212,21 +238,17 @@ void drawTracks() {
     Track tr = tracks.get(t);
     int y = yStart + t * (TRACK_H + TRACK_PAD);
 
-    // Label panel
     fill(PANEL); noStroke();
     rect(0, y, LABEL_W, TRACK_H, 4);
 
-    // Colour stripe (green = melodic, red = drum)
     boolean isMelodic = (tr instanceof MelodicTrack);
     fill(isMelodic ? CELL_ON_MEL : CELL_ON_DRM);
     noStroke();
     rect(4, y + 4, 5, TRACK_H - 8, 2);
 
-    // Track name
     fill(TEXT_LIGHT); textSize(12); textAlign(LEFT, CENTER);
     text(tr.label(), 16, y + TRACK_H / 2);
 
-    // Beat cells
     for (int s = 0; s < NUM_STEPS; s++) {
       Step step = tr.steps.get(s);
       int x  = LABEL_W + 8 + s * (CELL_SIZE + CELL_GAP);
@@ -247,12 +269,12 @@ void drawTracks() {
       rect(x, cy, CELL_SIZE, CELL_SIZE, 4);
 
       if (s % 4 == 0) {
-        fill(TEXT_DIM); noStroke(); textSize(8); textAlign(LEFT, TOP);
+        fill(TEXT_DIM);
+        noStroke(); textSize(8); textAlign(LEFT, TOP);
         text((s / 4) + 1, x + 2, cy + 2);
       }
     }
 
-    // Playhead bar
     if (playing) {
       int px = LABEL_W + 8 + currentStep * (CELL_SIZE + CELL_GAP) + CELL_SIZE / 2;
       stroke(PLAYHEAD); strokeWeight(2);
@@ -265,26 +287,29 @@ void drawTracks() {
 // ── Instructions bar ─────────────────────────────────────────
 void drawInstructions() {
   int y = height - 30;
-  fill(PANEL); noStroke(); rect(0, y, width, 30);
+  fill(PANEL); noStroke();
+  rect(0, y, width, 30);
   fill(TEXT_DIM); textSize(11); textAlign(LEFT, CENTER);
   text("SPACE play/stop   D add Drum   M add Melodic   ↑↓ BPM   Click cell to toggle   R reset", 12, y + 15);
 }
 
 // ── Mouse ────────────────────────────────────────────────────
 void mousePressed() {
-  // Play/stop button
   if (mouseX > 305 && mouseX < 375 && mouseY < HEADER_H) {
     playing = !playing;
-    if (playing) lastStepTime = millis();
+    if (playing) {
+      lastStepTime = millis();
+      triggerSoundsForStep(currentStep); 
+    }
     return;
   }
 
-  // Toggle step cells
   int yStart = HEADER_H + 18;
   for (int t = 0; t < tracks.size(); t++) {
     Track tr = tracks.get(t);
     int y  = yStart + t * (TRACK_H + TRACK_PAD);
     int cy = y + (TRACK_H - CELL_SIZE) / 2;
+
     for (int s = 0; s < NUM_STEPS; s++) {
       int x = LABEL_W + 8 + s * (CELL_SIZE + CELL_GAP);
       if (mouseX >= x && mouseX < x + CELL_SIZE
@@ -300,15 +325,16 @@ void mousePressed() {
 void keyPressed() {
   if (key == ' ') {
     playing = !playing;
-    if (playing) lastStepTime = millis();
+    if (playing) {
+      lastStepTime = millis();
+      triggerSoundsForStep(currentStep); 
+    }
 
   } else if (key == 'd' || key == 'D') {
-    // User action: instantiate a new Track and add to ArrayList
     String[] names = { "Clap","Tom","Ride","Open HH","Crash","Perc","Shaker" };
     tracks.add(new Track(names[(int)random(names.length)], CELL_ON_DRM));
 
   } else if (key == 'm' || key == 'M') {
-    // User action: instantiate a new MelodicTrack (subclass) and add to ArrayList
     String[] names = { "Pad","Arp","Stab","Chord","Sub","Pluck","Keys" };
     String[] notes = { "C3","D3","E3","F3","G3","A3","B3","C4","D4","G4","A4" };
     tracks.add(new MelodicTrack(
@@ -316,13 +342,11 @@ void keyPressed() {
       notes[(int)random(notes.length)],
       CELL_ON_MEL
     ));
-
+    
   } else if (keyCode == UP) {
     BPM = min(BPM + 2, 220);
-
   } else if (keyCode == DOWN) {
     BPM = max(BPM - 2, 40);
-
   } else if (key == 'r' || key == 'R') {
     for (Track tr : tracks) {
       for (Step s : tr.steps) s.active = false;
